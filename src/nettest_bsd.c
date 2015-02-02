@@ -5321,6 +5321,8 @@ recv_tcp_stream()
       send_response();
       exit(1);
     }
+    if (len == 0)
+      break;
     bytes_received += len;
     receive_calls++;
 
