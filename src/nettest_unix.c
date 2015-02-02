@@ -2714,7 +2714,6 @@ bytes  bytes  bytes   bytes  secs.   per sec  %%      %%      us/Tr   us/Tr\n\n"
        that sort of rot... */
 
 #ifdef WANT_INTERVALS
-    kept_times[MAX_KEPT_TIMES] = 0;
     time_index = 0;
     while (time_index < MAX_KEPT_TIMES) {
       if (kept_times[time_index] > 0) {
