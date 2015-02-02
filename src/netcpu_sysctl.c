@@ -6,6 +6,7 @@ char   netcpu_sysctl_id[]="\
 #endif
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #if HAVE_INTTYPES_H
