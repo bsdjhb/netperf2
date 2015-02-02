@@ -1793,7 +1793,7 @@ Send   Recv    Send   Recv             Send (avg)          Recv (avg)\n\
 Maximum\n\
 Segment        DDP       Size\n\
 Size (bytes)   Enabled   KB\n\
-%6d            %3s       %6d\n";
+%6d            %3s   %6d\n";
 #else
   char *ksink_fmt2 = "\n\
 Maximum\n\
