@@ -92,6 +92,8 @@ char	nettest_id[]="\
 # endif
 #endif
 
+#include <ctype.h>
+
 #ifdef NOSTDLIBH
 #include <malloc.h>
 #endif /* NOSTDLIBH */
@@ -5301,8 +5303,8 @@ recv_tcp_stream()
       olen = sizeof(tdr);
       len = getsockopt(s_data, IPPROTO_TCP, TCP_DDP_READ, &tdr, &olen);
       if (len == 0) {
-	buffer_ptr = loc_tcpddpbuf + tdr->offset;
-	len = tdr->length;
+	buffer_ptr = loc_tcpddpbuf + tdr.offset;
+	len = tdr.length;
       }
     } else {
 #else
