@@ -212,6 +212,17 @@ int
   loc_tcpcork=-1,
   rem_tcpcork=-1,
 #endif /* TCP_CORK */
+#ifdef TCP_DDP_STATIC
+  loc_tcpddp,
+  loc_tcpddpsize,
+  rem_tcpddp,
+  rem_tcpddpsize,
+#else
+  loc_tcpddp=-1,
+  loc_tcpddpsize=-1,
+  rem_tcpddp=-1,
+  rem_tcpddpsize=-1,
+#endif
   loc_sndavoid,		/* avoid send copies locally		*/
   loc_rcvavoid,		/* avoid recv copies locally		*/
   rem_sndavoid,		/* avoid send copies remotely		*/
@@ -224,6 +235,9 @@ int multicast_ttl = -1; /* should we set the multicast TTL to a value? */
 
 int want_keepalive = 0;
 
+#ifdef TCP_DDP_STATIC
+char *loc_tcpddpbuf;
+#endif
 #ifdef WANT_HISTOGRAM
 #ifdef HAVE_GETHRTIME
 static hrtime_t time_one;
@@ -373,6 +387,7 @@ Usage: netperf [global options] -- [test options] \n\
 TCP/UDP BSD Sockets Test Options:\n\
     -b number         Send number requests at start of _RR tests\n\
     -C                Set TCP_CORK when available\n\
+    -d [size]         Use static TCP DDP buffer\n\
     -D [L][,R]        Set TCP_NODELAY locally and/or remotely (TCP_*)\n\
     -h                Display this text\n\
     -H name,fam       Use name (or IP) and family as target of data connection\n\
@@ -1500,6 +1515,45 @@ create_data_socket(struct addrinfo *res)
   return temp_socket;
 }
 
+#ifdef TCP_DDP_STATIC
+static void
+enable_static_ddp(int socket)
+{
+  socklen_t len;
+  int optval;
+
+  if (loc_tcpddp <= 0)
+    return;
+
+  if (loc_tcpddpsize > 0) {
+    setsockopt(socket, IPPROTO_TCP, TCP_DDP_SIZE, &loc_tcpddpsize,
+	       sizeof(loc_tcpddpsize));
+  }
+  optval = 1;
+  if (setsockopt(socket, IPPROTO_TCP, TCP_DDP_STATIC, &optval,
+		 sizeof(optval)) == SOCKET_ERROR) {
+    loc_tcpddp = -1;
+    return;
+  }
+  len = sizeof(loc_tcpddpsize);
+  if (getsockopt(socket, IPPROTO_TCP, TCP_DDP_SIZE, &loc_tcpddpsize, &len) ==
+      SOCKET_ERROR) {
+    fprintf(where, "netperf: enable_static_ddp: TCP_DDP_SIZE: errno %d\n",
+	    errno);
+    fflush(where);
+    loc_tcpddpsize = -1;
+  }
+  len = sizeof(loc_tcpddpbuf);
+  if (getsockopt(socket, IPPROTO_TCP, TCP_DDP_MAP, &loc_tcpddpbuf, &len) ==
+      SOCKET_ERROR) {
+    fprintf(where, "netperf: enable_static_ddp: TCP_DDP_MAP: errno %d\n",
+	    errno);
+    fflush(where);
+    loc_tcpddpbuf = NULL;
+  }
+}
+#endif
+
 #ifdef KLUDGE_SOCKET_OPTIONS
 
 
@@ -1732,11 +1786,19 @@ Local  Remote  Local  Remote  Xfered   Per                 Per\n\
 Send   Recv    Send   Recv             Send (avg)          Recv (avg)\n\
 %5d   %5d  %5d   %5d %6.4g  %6.2f    %6d   %6.2f %6d\n";
 
+#ifdef TCP_DDP_STATIC
+  char *ksink_fmt2 = "\n\
+Maximum\n\
+Segment        DDP       Size\n\
+Size (bytes)   Enabled   KB\n\
+%6d            %3s       %6d\n";
+#else
   char *ksink_fmt2 = "\n\
 Maximum\n\
 Segment\n\
 Size (bytes)\n\
 %6d\n";
+#endif
 
 
   float			elapsed_time;
@@ -1927,6 +1989,8 @@ Size (bytes)\n\
 #endif /* DIRTY */
       tcp_stream_request->port            =    atoi(remote_data_port);
       tcp_stream_request->ipfamily = af_to_nf(remote_res->ai_family);
+      tcp_stream_request->static_ddp    =       rem_tcpddp;
+      tcp_stream_request->ddp_size      =       rem_tcpddpsize;
       if (debug > 1) {
 	fprintf(where,
 		"netperf: send_tcp_stream: requesting TCP stream test\n");
@@ -2193,6 +2257,8 @@ Size (bytes)\n\
 	 really didn't send what he asked for ;-) */
 
       bytes_sent	= ntohd(tcp_stream_result->bytes_received);
+      rem_tcpddp        = tcp_stream_result->static_ddp;
+      rem_tcpddpsize    = tcp_stream_result->ddp_size;
     }
     else {
       bytes_sent = (double)local_bytes_sent;
@@ -2395,9 +2461,17 @@ Size (bytes)\n\
 	    nummessages,
 	    bytes_sent / (double)tcp_stream_result->recv_calls,
 	    tcp_stream_result->recv_calls);
+#ifdef TCP_DDP_STATIC
+    fprintf(where,
+	    ksink_fmt2,
+	    tcp_mss,
+	    rem_tcpddp > 0 ? "Yes" : "No",
+	    rem_tcpddpsize > 0 ? rem_tcpddpsize / 1024 : -1);
+#else
     fprintf(where,
 	    ksink_fmt2,
 	    tcp_mss);
+#endif
     fflush(where);
 #ifdef WANT_HISTOGRAM
     fprintf(where,"\n\nHistogram of time spent in send() call.\n");
@@ -5040,6 +5114,8 @@ recv_tcp_stream()
   loc_nodelay  = tcp_stream_request->no_delay;
   loc_rcvavoid = tcp_stream_request->so_rcvavoid;
   loc_sndavoid = tcp_stream_request->so_sndavoid;
+  loc_tcpddp   = tcp_stream_request->static_ddp;
+  loc_tcpddpsize = tcp_stream_request->ddp_size;
 
   set_hostname_and_port(local_name,
 			port_buffer,
@@ -5171,6 +5247,9 @@ recv_tcp_stream()
     exit(1);
   }
 
+#ifdef TCP_DDP_STATIC
+  enable_static_ddp(s_data);
+#endif
 #ifdef WIN32
   /* this is used so the timer thread can close the socket out from */
   /* under us, which to date is the easiest/cleanest/least */
@@ -5212,7 +5291,26 @@ recv_tcp_stream()
   bytes_received = 0;
   receive_calls  = 0;
 
-  while (!times_up && ((len = recv(s_data, recv_ring->buffer_ptr, recv_size, 0)) != 0)) {
+  while (!times_up) {
+    char *buffer_ptr;
+#ifdef TCP_DDP_STATIC
+    struct tcp_ddp_read tdr;
+    socklen_t olen;
+
+    if (loc_tcpddp > 0) {
+      olen = sizeof(tdr);
+      len = getsockopt(s_data, IPPROTO_TCP, TCP_DDP_READ, &tdr, &olen);
+      if (len == 0) {
+	buffer_ptr = loc_tcpddpbuf + tdr->offset;
+	len = tdr->length;
+      }
+    } else {
+#else
+    {
+#endif
+      buffer_ptr = recv_ring->buffer_ptr;
+      len = recv(s_data, buffer_ptr, recv_size, 0);
+    }
     if (len == SOCKET_ERROR ) {
       if (times_up) {
 	break;
@@ -5226,8 +5324,8 @@ recv_tcp_stream()
 
 #ifdef DIRTY
     /* we access the buffer after the recv() call now, rather than before */
-    access_buffer(recv_ring->buffer_ptr,
-		  recv_size,
+    access_buffer(buffer_ptr,
+		  len,
 		  tcp_stream_request->dirty_count,
 		  tcp_stream_request->clean_count);
 #endif /* DIRTY */
@@ -13007,7 +13105,7 @@ scan_sockets_args(int argc, char *argv[])
 
 {
 
-#define SOCKETS_ARGS "b:CDnNhH:L:m:M:p:P:r:R:s:S:T:Vw:W:z46"
+#define SOCKETS_ARGS "b:CdDnNhH:L:m:M:p:P:r:R:s:S:T:Vw:W:z46"
 
   extern char	*optarg;	  /* pointer to option string	*/
 
@@ -13082,6 +13180,18 @@ scan_sockets_args(int argc, char *argv[])
 #else
       printf("WARNING: TCP_CORK not available on this platform!\n");
 #endif /* TCP_CORK */
+      break;
+    case 'd':
+#ifdef TCP_DDP_STATIC
+      rem_tcpddp = 1;
+      if (argv[optind] && isdigit((unsigned char)argv[optind][0])){
+	/* there was an optional parm */
+	rem_tcpddpsize = atoi(argv[optind]);
+	optind++;
+      }
+#else
+      printf("TCP static DDP not available on this platform\n");
+#endif
       break;
     case 'D':
       /* set the TCP nodelay flag */

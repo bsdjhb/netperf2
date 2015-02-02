@@ -201,6 +201,8 @@ struct	tcp_stream_request_struct {
 			   to allow netperf to run through those evil
 			   firewall things */
   int   ipfamily;       /* the address family of ipaddress */
+  int   static_ddp;
+  int   ddp_size;
 };
 
 struct	tcp_stream_response_struct {
@@ -226,6 +228,8 @@ struct tcp_stream_results_struct {
   int            num_cpus;      /* how many CPUs had the remote? */
   int            recv_buf_size; /* how large was it at the end? */
   int            send_buf_size; /* how large was it at the end? */
+  int   static_ddp;
+  int   ddp_size;
 };
 
 struct	tcp_maerts_request_struct {
