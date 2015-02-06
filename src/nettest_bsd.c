@@ -13192,7 +13192,7 @@ scan_sockets_args(int argc, char *argv[])
       rem_tcpddp = 1;
       if (argv[optind] && isdigit((unsigned char)argv[optind][0])){
 	/* there was an optional parm */
-	rem_tcpddpsize = atoi(argv[optind]);
+	rem_tcpddpsize = convert(argv[optind]);
 	optind++;
       }
 #else
