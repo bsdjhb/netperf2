@@ -5375,6 +5375,8 @@ recv_tcp_stream()
   tcp_stream_results->bytes_received	= htond(bytes_received);
   tcp_stream_results->elapsed_time	= elapsed_time;
   tcp_stream_results->recv_calls	= receive_calls;
+  tcp_stream_results->static_ddp	= loc_tcpddp;
+  tcp_stream_results->ddp_size          = loc_tcpddpsize;
 
   tcp_stream_results->cpu_method = cpu_method;
   tcp_stream_results->num_cpus   = lib_num_loc_cpus;
