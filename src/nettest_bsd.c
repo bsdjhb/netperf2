@@ -216,13 +216,17 @@ int
 #endif /* TCP_CORK */
 #ifdef TCP_DDP_STATIC
   loc_tcpddp,
+  loc_tcpddpcount,
   loc_tcpddpsize,
   rem_tcpddp,
+  rem_tcpddpcount,
   rem_tcpddpsize,
 #else
   loc_tcpddp=-1,
+  loc_tcpddpcount=-1,
   loc_tcpddpsize=-1,
   rem_tcpddp=-1,
+  rem_tcpddpcount=-1,
   rem_tcpddpsize=-1,
 #endif
   loc_sndavoid,		/* avoid send copies locally		*/
@@ -238,7 +242,7 @@ int multicast_ttl = -1; /* should we set the multicast TTL to a value? */
 int want_keepalive = 0;
 
 #ifdef TCP_DDP_STATIC
-char *loc_tcpddpbuf;
+struct tcp_ddp_map loc_tcpddpmap;
 #endif
 #ifdef WANT_HISTOGRAM
 #ifdef HAVE_GETHRTIME
@@ -389,7 +393,7 @@ Usage: netperf [global options] -- [test options] \n\
 TCP/UDP BSD Sockets Test Options:\n\
     -b number         Send number requests at start of _RR tests\n\
     -C                Set TCP_CORK when available\n\
-    -d [size]         Use static TCP DDP buffer\n\
+    -d [count,size]   Use static TCP DDP buffer\n\
     -D [L][,R]        Set TCP_NODELAY locally and/or remotely (TCP_*)\n\
     -h                Display this text\n\
     -H name,fam       Use name (or IP) and family as target of data connection\n\
@@ -1527,6 +1531,10 @@ enable_static_ddp(int socket)
   if (loc_tcpddp <= 0)
     return;
 
+  if (loc_tcpddpcount > 0) {
+    setsockopt(socket, IPPROTO_TCP, TCP_DDP_COUNT, &loc_tcpddpcount,
+	       sizeof(loc_tcpddpcount));
+  }
   if (loc_tcpddpsize > 0) {
     setsockopt(socket, IPPROTO_TCP, TCP_DDP_SIZE, &loc_tcpddpsize,
 	       sizeof(loc_tcpddpsize));
@@ -1537,6 +1545,14 @@ enable_static_ddp(int socket)
     loc_tcpddp = -1;
     return;
   }
+  len = sizeof(loc_tcpddpcount);
+  if (getsockopt(socket, IPPROTO_TCP, TCP_DDP_COUNT, &loc_tcpddpcount, &len) ==
+      SOCKET_ERROR) {
+    fprintf(where, "netperf: enable_static_ddp: TCP_DDP_COUNT: errno %d\n",
+	    errno);
+    fflush(where);
+    loc_tcpddpcount = -1;
+  }
   len = sizeof(loc_tcpddpsize);
   if (getsockopt(socket, IPPROTO_TCP, TCP_DDP_SIZE, &loc_tcpddpsize, &len) ==
       SOCKET_ERROR) {
@@ -1545,13 +1561,13 @@ enable_static_ddp(int socket)
     fflush(where);
     loc_tcpddpsize = -1;
   }
-  len = sizeof(loc_tcpddpbuf);
-  if (getsockopt(socket, IPPROTO_TCP, TCP_DDP_MAP, &loc_tcpddpbuf, &len) ==
+  len = sizeof(loc_tcpddpmap);
+  if (getsockopt(socket, IPPROTO_TCP, TCP_DDP_MAP, &loc_tcpddpmap, &len) ==
       SOCKET_ERROR) {
     fprintf(where, "netperf: enable_static_ddp: TCP_DDP_MAP: errno %d\n",
 	    errno);
     fflush(where);
-    loc_tcpddpbuf = NULL;
+    memset(&loc_tcpddpmap, 0, sizeof(loc_tcpddpmap));
   }
 }
 #endif
@@ -1790,10 +1806,10 @@ Send   Recv    Send   Recv             Send (avg)          Recv (avg)\n\
 
 #ifdef TCP_DDP_STATIC
   char *ksink_fmt2 = "\n\
-Maximum\n\
-Segment        DDP       Size\n\
-Size (bytes)   Enabled   KB\n\
-%6d            %3s   %6d\n";
+Maximum                   DDP\n\
+Segment                           Size\n\
+Size (bytes)   Enabled   Count    KB\n\
+%6d            %3s   %6d   %6d\n";
 #else
   char *ksink_fmt2 = "\n\
 Maximum\n\
@@ -1992,6 +2008,7 @@ Size (bytes)\n\
       tcp_stream_request->port            =    atoi(remote_data_port);
       tcp_stream_request->ipfamily = af_to_nf(remote_res->ai_family);
       tcp_stream_request->static_ddp    =       rem_tcpddp;
+      tcp_stream_request->ddp_count     =       rem_tcpddpcount;
       tcp_stream_request->ddp_size      =       rem_tcpddpsize;
       if (debug > 1) {
 	fprintf(where,
@@ -2260,6 +2277,7 @@ Size (bytes)\n\
 
       bytes_sent	= ntohd(tcp_stream_result->bytes_received);
       rem_tcpddp        = tcp_stream_result->static_ddp;
+      rem_tcpddpcount   = tcp_stream_result->ddp_count;
       rem_tcpddpsize    = tcp_stream_result->ddp_size;
     }
     else {
@@ -2468,6 +2486,7 @@ Size (bytes)\n\
 	    ksink_fmt2,
 	    tcp_mss,
 	    rem_tcpddp > 0 ? "Yes" : "No",
+	    rem_tcpddpcount,
 	    rem_tcpddpsize > 0 ? rem_tcpddpsize / 1024 : -1);
 #else
     fprintf(where,
@@ -5117,6 +5136,7 @@ recv_tcp_stream()
   loc_rcvavoid = tcp_stream_request->so_rcvavoid;
   loc_sndavoid = tcp_stream_request->so_sndavoid;
   loc_tcpddp   = tcp_stream_request->static_ddp;
+  loc_tcpddpcount = tcp_stream_request->ddp_count;
   loc_tcpddpsize = tcp_stream_request->ddp_size;
 
   set_hostname_and_port(local_name,
@@ -5303,7 +5323,7 @@ recv_tcp_stream()
       olen = sizeof(tdr);
       len = getsockopt(s_data, IPPROTO_TCP, TCP_DDP_READ, &tdr, &olen);
       if (len == 0) {
-	buffer_ptr = loc_tcpddpbuf + tdr.offset;
+	buffer_ptr = loc_tcpddpmap.address + tdr.offset;
 	len = tdr.length;
       }
     } else {
@@ -5335,6 +5355,12 @@ recv_tcp_stream()
 #endif /* DIRTY */
 
 
+#ifdef TCP_DDP_STATIC
+    if (loc_tcpddp > 0)
+	    setsockopt(s_data, IPPROTO_TCP, TCP_DDP_POST, &tdr.bufid,
+		sizeof(tdr.bufid));
+    else
+#endif
     /* move to the next buffer in the recv_ring */
     recv_ring = recv_ring->next;
 
@@ -5360,6 +5386,11 @@ recv_tcp_stream()
 
   cpu_stop(tcp_stream_request->measure_cpu,&elapsed_time);
 
+#ifdef TCP_DDP_STATIC
+  if (loc_tcpddp > 0)
+	  munmap(loc_tcpddpmap.address, loc_tcpddpmap.length);
+#endif
+
   /* send the results to the sender			*/
 
   if (debug) {
@@ -5376,6 +5407,7 @@ recv_tcp_stream()
   tcp_stream_results->elapsed_time	= elapsed_time;
   tcp_stream_results->recv_calls	= receive_calls;
   tcp_stream_results->static_ddp	= loc_tcpddp;
+  tcp_stream_results->ddp_count         = loc_tcpddpcount;
   tcp_stream_results->ddp_size          = loc_tcpddpsize;
 
   tcp_stream_results->cpu_method = cpu_method;
@@ -13190,9 +13222,13 @@ scan_sockets_args(int argc, char *argv[])
     case 'd':
 #ifdef TCP_DDP_STATIC
       rem_tcpddp = 1;
-      if (argv[optind] && isdigit((unsigned char)argv[optind][0])){
+      if (argv[optind] && isdigit((unsigned char)argv[optind][0])) {
 	/* there was an optional parm */
-	rem_tcpddpsize = convert(argv[optind]);
+	break_args_explicit(argv[optind],arg1,arg2);
+	if (arg1[0])
+		rem_tcpddpcount = convert(arg1);
+	if (arg2[0])
+		rem_tcpddpsize = convert(arg2);
 	optind++;
       }
 #else

@@ -202,6 +202,7 @@ struct	tcp_stream_request_struct {
 			   firewall things */
   int   ipfamily;       /* the address family of ipaddress */
   int   static_ddp;
+  int   ddp_count;
   int   ddp_size;
 };
 
@@ -229,6 +230,7 @@ struct tcp_stream_results_struct {
   int            recv_buf_size; /* how large was it at the end? */
   int            send_buf_size; /* how large was it at the end? */
   int   static_ddp;
+  int   ddp_count;
   int   ddp_size;
 };
 
