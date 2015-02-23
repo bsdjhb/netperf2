@@ -106,6 +106,9 @@ char	nettest_id[]="\
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#ifdef TCP_DDP_STATIC
+#include <sys/mman.h>
+#endif
 
 #ifdef HAVE_NETINET_SCTP_H
 #include <netinet/sctp.h>
