@@ -13227,7 +13227,8 @@ scan_sockets_args(int argc, char *argv[])
     case 'd':
 #ifdef TCP_DDP_STATIC
       rem_tcpddp = 1;
-      if (argv[optind] && isdigit((unsigned char)argv[optind][0])) {
+      if (argv[optind] && (isdigit((unsigned char)argv[optind][0]) ||
+	  argv[optid][0] == ',')) {
 	/* there was an optional parm */
 	break_args_explicit(argv[optind],arg1,arg2);
 	if (arg1[0])
