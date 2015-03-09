@@ -1547,7 +1547,7 @@ enable_static_ddp(int socket)
 		 sizeof(optval)) == SOCKET_ERROR) {
     loc_tcpddp = -1;
     loc_tcpddpcount = 0;
-    loc_tcpddsize = 0;
+    loc_tcpddpsize = 0;
     return;
   }
   len = sizeof(loc_tcpddpcount);
