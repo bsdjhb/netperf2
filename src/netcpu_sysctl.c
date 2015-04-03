@@ -63,10 +63,19 @@ char   netcpu_sysctl_id[]="\
 
 static CP_TIME_TYPE lib_start_count[CPUSTATES];
 static CP_TIME_TYPE lib_end_count[CPUSTATES];
+#ifdef __FreeBSD__
+static int ncpu;
+#endif
 
 void
 cpu_util_init(void)
 {
+#ifdef __FreeBSD__
+  size_t ncpu_len = sizeof (ncpu);
+
+  if (sysctlbyname("hw.ncpu", &ncpu, &ncpu_len, NULL, 0) == -1)
+      ncpu = 1;
+#endif
   return;
 }
 
@@ -116,6 +125,9 @@ calc_cpu_util_internal(float elapsed_time)
   sum_idle = lib_end_count[CP_IDLE] - lib_start_count[CP_IDLE];
   lib_local_cpu_util = (float)sum_busy / (float)(sum_busy + sum_idle);
   lib_local_cpu_util *= 100.0;
+#ifdef __FreeBSD__
+  lib_local_cpu_util *= ncpu;
+#endif
 
   return lib_local_cpu_util;
 
