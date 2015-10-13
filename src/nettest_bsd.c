@@ -74,6 +74,9 @@ char	nettest_id[]="\
 #if HAVE_UNISTD_H
 # include <unistd.h>
 #endif
+#if HAVE_AIO_H
+# include <aio.h>
+#endif
 
 #include <fcntl.h>
 #ifndef WIN32
@@ -212,6 +215,13 @@ int
   loc_tcpcork=-1,
   rem_tcpcork=-1,
 #endif /* TCP_CORK */
+#if HAVE_AIO_H
+  loc_rcvaio,           /* don't/do use aio_read() locally      */
+  rem_rcvaio,           /* don't/do use aio_read() remotely     */
+#else
+  loc_rcvaio=-1,
+  rem_rcvaio=-1,
+#endif
   loc_sndavoid,		/* avoid send copies locally		*/
   loc_rcvavoid,		/* avoid recv copies locally		*/
   rem_sndavoid,		/* avoid send copies remotely		*/
@@ -371,6 +381,7 @@ char sockets_usage[] = "\n\
 Usage: netperf [global options] -- [test options] \n\
 \n\
 TCP/UDP BSD Sockets Test Options:\n\
+    -A                Use aio_read(2)\n\
     -b number         Send number requests at start of _RR tests\n\
     -C                Set TCP_CORK when available\n\
     -D [L][,R]        Set TCP_NODELAY locally and/or remotely (TCP_*)\n\
@@ -1927,6 +1938,7 @@ Size (bytes)\n\
 #endif /* DIRTY */
       tcp_stream_request->port            =    atoi(remote_data_port);
       tcp_stream_request->ipfamily = af_to_nf(remote_res->ai_family);
+      tcp_stream_request->recv_aio      =       rem_rcvaio;
       if (debug > 1) {
 	fprintf(where,
 		"netperf: send_tcp_stream: requesting TCP stream test\n");
@@ -5040,6 +5052,7 @@ recv_tcp_stream()
   loc_nodelay  = tcp_stream_request->no_delay;
   loc_rcvavoid = tcp_stream_request->so_rcvavoid;
   loc_sndavoid = tcp_stream_request->so_sndavoid;
+  loc_rcvaio   = tcp_stream_request->recv_aio;
 
   set_hostname_and_port(local_name,
 			port_buffer,
@@ -5212,7 +5225,60 @@ recv_tcp_stream()
   bytes_received = 0;
   receive_calls  = 0;
 
-  while (!times_up && ((len = recv(s_data, recv_ring->buffer_ptr, recv_size, 0)) != 0)) {
+#if HAVE_AIO_H
+  if (loc_rcvaio > 0) {
+    struct iocb *iocb;
+    unsigned int i;
+
+    for (i = 0; i < recv_width; i++) {
+      assert(recv_ring->completion_ptr == NULL);
+      iocb = calloc(1, sizeof(*iocb));
+      iocb->aio_nbytes = recv_size;
+      iocb->aio_fildes = s_data;
+      iocb->aio_buf = recv_ring->buffer_ptr;
+      recv_ring->completion_ptr = iocb;
+      recv_ring = recv_ring->next;
+      if (aio_read(iocb) != 0) {
+        netperf_response.content.serv_errno = errno;
+        send_response();
+        exit(1);
+      }
+    }    
+    assert(recv_ring->completion_ptr != NULL);
+  }
+#endif
+
+  while (!times_up) {
+#if HAVE_AIO_H
+    if (loc_rcvaio > 0) {
+      struct iocb *iocb, *iocblist[1];
+      int error;
+
+      /*
+       * POSIX doesn't define which order jobs of the same priority
+       * are completed in on all systems.  This hopes for FIFO.
+       */
+      iocb = recv_ring->completion_ptr;
+      iocblist[0] = iocb;
+      if (aio_suspend(iocblist, 1, NULL) == -1) {
+        len = SOCKET_ERROR;
+      } else {
+        error = aio_error(iocb);
+        if (error == 0) {
+          len = aio_return(iocb);
+        } else {
+          errno = error;
+          len = SOCKET_ERROR;
+        }
+      }
+    } else
+#else
+    {
+#endif
+      len = recv(s_data, recv_ring->buffer_ptr, recv_size, 0);
+    }
+    if (len == 0)
+      break;
     if (len == SOCKET_ERROR ) {
       if (times_up) {
 	break;
@@ -5232,6 +5298,22 @@ recv_tcp_stream()
 		  tcp_stream_request->clean_count);
 #endif /* DIRTY */
 
+#if HAVE_AIO_H
+    {
+      struct aiocb *iocb;
+
+      iocb = recv_ring->completion_ptr;
+      memset(iocb, 0, sizeof(*iocb));
+      iocb->aio_nbytes = recv_size;
+      iocb->aio_fildes = s_data;
+      iocb->aio_buf = recv_ring->buffer_ptr;
+      if (aio_read(iocb) != 0) {
+        netperf_response.content.serv_errno = errno;
+        send_response();
+        exit(1);
+      }      
+    }
+#endif
 
     /* move to the next buffer in the recv_ring */
     recv_ring = recv_ring->next;
@@ -13007,7 +13089,7 @@ scan_sockets_args(int argc, char *argv[])
 
 {
 
-#define SOCKETS_ARGS "b:CDnNhH:L:m:M:p:P:r:R:s:S:T:Vw:W:z46"
+#define SOCKETS_ARGS "Ab:CDnNhH:L:m:M:p:P:r:R:s:S:T:Vw:W:z46"
 
   extern char	*optarg;	  /* pointer to option string	*/
 
@@ -13067,6 +13149,13 @@ scan_sockets_args(int argc, char *argv[])
     case 'h':
       print_sockets_usage();
       exit(1);
+    case 'A':
+#ifdef HAVE_AIO_H
+      rem_rcvaio = 1;
+#else
+      fprintf(stderr, "Asynchronous I/O not available on this platform\n");
+#endif
+      break;
     case 'b':
 #ifdef WANT_FIRST_BURST
       first_burst_size = atoi(optarg);
