@@ -5300,7 +5300,7 @@ recv_tcp_stream()
 #endif /* DIRTY */
 
 #if HAVE_AIO_H
-    {
+    if (loc_rcvaio > 0) {
       struct aiocb *iocb;
 
       iocb = recv_ring->completion_ptr;
