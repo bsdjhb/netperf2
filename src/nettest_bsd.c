@@ -75,6 +75,7 @@ char	nettest_id[]="\
 # include <unistd.h>
 #endif
 #if HAVE_AIO_H
+# include <assert.h> // XXX
 # include <aio.h>
 #endif
 
@@ -5227,7 +5228,7 @@ recv_tcp_stream()
 
 #if HAVE_AIO_H
   if (loc_rcvaio > 0) {
-    struct iocb *iocb;
+    struct aiocb *iocb;
     unsigned int i;
 
     for (i = 0; i < recv_width; i++) {
@@ -5251,7 +5252,8 @@ recv_tcp_stream()
   while (!times_up) {
 #if HAVE_AIO_H
     if (loc_rcvaio > 0) {
-      struct iocb *iocb, *iocblist[1];
+      const struct aiocb *iocblist[1];
+      struct aiocb *iocb;
       int error;
 
       /*
@@ -5272,9 +5274,8 @@ recv_tcp_stream()
         }
       }
     } else
-#else
-    {
 #endif
+    {
       len = recv(s_data, recv_ring->buffer_ptr, recv_size, 0);
     }
     if (len == 0)
