@@ -219,9 +219,13 @@ int
 #if HAVE_AIO_H
   loc_rcvaio,           /* don't/do use aio_read() locally      */
   rem_rcvaio,           /* don't/do use aio_read() remotely     */
+  loc_sndaio,           /* don't/do use aio_write() locally     */
+  rem_sndaio,           /* don't/do use aio_write() remotely    */
 #else
   loc_rcvaio=-1,
   rem_rcvaio=-1,
+  loc_sndaio=-1,
+  rem_sndaio=-1,
 #endif
   loc_sndavoid,		/* avoid send copies locally		*/
   loc_rcvavoid,		/* avoid recv copies locally		*/
@@ -382,6 +386,7 @@ char sockets_usage[] = "\n\
 Usage: netperf [global options] -- [test options] \n\
 \n\
 TCP/UDP BSD Sockets Test Options:\n\
+    -a                Use aio_write(2)\n\
     -A                Use aio_read(2)\n\
     -b number         Send number requests at start of _RR tests\n\
     -C                Set TCP_CORK when available\n\
@@ -2086,10 +2091,34 @@ Size (bytes)\n\
       }
 #endif /* WANT_HISTOGRAM */
 
-      if((len=send(send_socket,
+#if HAVE_AIO_H
+      if (loc_sndaio > 0) {
+	const struct aiocb *iocblist[1];
+	struct aiocb *iocb;
+
+	iocb = send_ring->completion_ptr;
+	if (iocb == NULL) {
+	  iocb = calloc(1, sizeof(*iocb));
+	  iocb->aio_nbytes = send_size;
+	  iocb->aio_fildes = send_socket;
+	  iocb->aio_buf = send_ring->buffer_ptr;
+	  send_ring->completion_ptr = iocb;
+	}
+	iocblist[0] = iocb;
+	if (aio_write(iocb) == -1 ||
+	    aio_suspend(iocblist, 1, NULL) == -1) {
+	  perror("netperf: data send error");
+	  exit(1);
+	}
+	len = aio_return(iocb);
+      } else
+#endif
+	len = send(send_socket,
 		   send_ring->buffer_ptr,
 		   send_size,
-		   0)) != send_size) {
+		   0);
+
+      if(len != send_size) {
       if ((len >=0) || SOCKET_EINTR(len)) {
 	    /* the test was interrupted, must be the end of test */
 	    break;
@@ -13090,7 +13119,7 @@ scan_sockets_args(int argc, char *argv[])
 
 {
 
-#define SOCKETS_ARGS "Ab:CDnNhH:L:m:M:p:P:r:R:s:S:T:Vw:W:z46"
+#define SOCKETS_ARGS "aAb:CDnNhH:L:m:M:p:P:r:R:s:S:T:Vw:W:z46"
 
   extern char	*optarg;	  /* pointer to option string	*/
 
@@ -13150,6 +13179,13 @@ scan_sockets_args(int argc, char *argv[])
     case 'h':
       print_sockets_usage();
       exit(1);
+    case 'a':
+#ifdef HAVE_AIO_H
+      loc_sndaio = 1;
+#else
+      fprintf(stderr, "Asynchronous I/O not available on this platform\n");
+#endif
+      break;
     case 'A':
 #ifdef HAVE_AIO_H
       rem_rcvaio = 1;
