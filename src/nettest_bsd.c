@@ -2108,6 +2108,10 @@ Size (bytes)\n\
 	iocblist[0] = iocb;
 	if (aio_write(iocb) == -1 ||
 	    aio_suspend(iocblist, 1, NULL) == -1) {
+	  if (errno == EINTR) {
+	    /* the test was interrupted, must be the end of test */
+	    break;
+	  }
 	  perror("netperf: data send error");
 	  exit(1);
 	}
