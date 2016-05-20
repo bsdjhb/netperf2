@@ -2099,11 +2099,12 @@ Size (bytes)\n\
 	iocb = send_ring->completion_ptr;
 	if (iocb == NULL) {
 	  iocb = calloc(1, sizeof(*iocb));
-	  iocb->aio_nbytes = send_size;
-	  iocb->aio_fildes = send_socket;
-	  iocb->aio_buf = send_ring->buffer_ptr;
 	  send_ring->completion_ptr = iocb;
-	}
+	} else
+	  memset(iocb, 0, sizeof(*iocb));
+	iocb->aio_nbytes = send_size;
+	iocb->aio_fildes = send_socket;
+	iocb->aio_buf = send_ring->buffer_ptr;
 	iocblist[0] = iocb;
 	if (aio_write(iocb) == -1 ||
 	    aio_suspend(iocblist, 1, NULL) == -1) {
