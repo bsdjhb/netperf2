@@ -2106,8 +2106,7 @@ Size (bytes)\n\
 	iocb->aio_fildes = send_socket;
 	iocb->aio_buf = send_ring->buffer_ptr;
 	iocblist[0] = iocb;
-	if (aio_write(iocb) == -1 ||
-	    aio_suspend(iocblist, 1, NULL) == -1) {
+	if (aio_write(iocb) == -1) {
 	  if (errno == EINTR) {
 	    /* the test was interrupted, must be the end of test */
 	    break;
@@ -2115,7 +2114,30 @@ Size (bytes)\n\
 	  perror("netperf: data send error");
 	  exit(1);
 	}
+	if (aio_suspend(iocblist, 1, NULL) == -1) {
+	  if (errno != EINTR) {
+	    perror("netperf: data send error");
+	    exit(1);
+	  }
+
+	  /* the test was interrupted, try to cancel the I/O and */
+	  /* wait again. */
+	  if (aio_cancel(send_socket, iocb) == -1) {
+	    perror("netperf: aio_cancel error");
+	    exit(1);
+	  }
+
+	  while (aio_suspend(iocblist, 1, NULL) == -1) {
+	    if (errno != EINTR) {
+	      perror("netperf: data send error");
+	      exit(1);
+	    }
+	  }
+	}
 	len = aio_return(iocb);
+	if (len == -1 && errno == ECANCELED) {
+	  errno = EINTR;
+	}
       } else
 #endif
 	len = send(send_socket,
