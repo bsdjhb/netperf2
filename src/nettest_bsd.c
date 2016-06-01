@@ -2209,7 +2209,7 @@ Size (bytes)\n\
       struct aiocb *iocb;
       int error;
 
-      send_ring = send_ring2;
+      send_ring2 = send_ring;
       while (send_ring2->completion_ptr != NULL) {
 	if (aio_cancel(send_socket, send_ring2->completion_ptr) == -1) {
 	  perror("netperf: data send error");
