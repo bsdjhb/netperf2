@@ -2074,6 +2074,35 @@ Size (bytes)\n\
 
     while ((!times_up) || (bytes_remaining > 0)) {
 
+#if HAVE_AIO_H
+      /* When using aio, wait for the previous write for this buffer to
+	 complete. */
+      if (loc_sndaio > 0 && send_ring->completion_ptr != NULL) {
+	const struct aiocb *iocblist[1];
+	struct aiocb *iocb;
+	int error;
+
+	iocb = send_ring->completion_ptr;
+	iocblist[0] = iocb;
+	if (aio_suspend(iocblist, 1, NULL) == -1) {
+	  if (errno == EINTR) {
+	    /* the test was interrupted, must be the end of test */
+	    break;
+	  }
+	  perror("netperf: data send error");
+	  exit(1);
+	}
+
+	error = aio_error(iocb);
+	if (error == 0)
+	  len = aio_return(iocb);
+	else {
+	  len = SOCKET_ERROR;
+	  errno = error;
+	}
+      }
+#endif
+
 #ifdef DIRTY
       access_buffer(send_ring->buffer_ptr,
 		    send_size,
@@ -2093,10 +2122,9 @@ Size (bytes)\n\
 
 #if HAVE_AIO_H
       if (loc_sndaio > 0) {
-	const struct aiocb *iocblist[1];
-	struct aiocb *iocb;
+	struct aiocb *iocb, *old;
 
-	iocb = send_ring->completion_ptr;
+	old = iocb = send_ring->completion_ptr;
 	if (iocb == NULL) {
 	  iocb = calloc(1, sizeof(*iocb));
 	  send_ring->completion_ptr = iocb;
@@ -2105,39 +2133,20 @@ Size (bytes)\n\
 	iocb->aio_nbytes = send_size;
 	iocb->aio_fildes = send_socket;
 	iocb->aio_buf = send_ring->buffer_ptr;
-	iocblist[0] = iocb;
 	if (aio_write(iocb) == -1) {
 	  if (errno == EINTR) {
 	    /* the test was interrupted, must be the end of test */
+	    /* clear the completion pointer to avoid trying to cancel it */
+	    send_ring->completion_ptr = NULL;
+	    send_ring = send_ring->next;
 	    break;
 	  }
 	  perror("netperf: data send error");
 	  exit(1);
 	}
-	if (aio_suspend(iocblist, 1, NULL) == -1) {
-	  if (errno != EINTR) {
-	    perror("netperf: data send error");
-	    exit(1);
-	  }
-
-	  /* the test was interrupted, try to cancel the I/O and */
-	  /* wait again. */
-	  if (aio_cancel(send_socket, iocb) == -1) {
-	    perror("netperf: aio_cancel error");
-	    exit(1);
-	  }
-
-	  while (aio_suspend(iocblist, 1, NULL) == -1) {
-	    if (errno != EINTR) {
-	      perror("netperf: data send error");
-	      exit(1);
-	    }
-	  }
-	}
-	len = aio_return(iocb);
-	if (len == -1 && errno == ECANCELED) {
-	  errno = EINTR;
-	}
+	if (old == NULL)
+	  /* No previous write was completed. */
+	  goto next_buffer;
       } else
 #endif
 	len = send(send_socket,
@@ -2156,6 +2165,10 @@ Size (bytes)\n\
       }
 
       local_bytes_sent += send_size;
+
+#if HAVE_AIO_H
+    next_buffer:
+#endif
 
 #ifdef WANT_HISTOGRAM
       if (verbosity > 1) {
@@ -2188,6 +2201,47 @@ Size (bytes)\n\
     /* The test is over. Flush the buffers to the remote end. We do a */
     /* graceful release to insure that all data has been taken by the */
     /* remote. */
+
+#if HAVE_AIO_H
+    if (loc_sndaio > 0) {
+      const struct aiocb *iocblist[1];
+      struct ring_elt *send_ring2;
+      struct aiocb *iocb;
+      int error;
+
+      send_ring = send_ring2;
+      while (send_ring2->completion_ptr != NULL) {
+	if (aio_cancel(send_socket, send_ring2->completion_ptr) == -1) {
+	  perror("netperf: data send error");
+	  exit(1);
+	}
+	send_ring2 = send_ring2->next;
+	if (send_ring2 == send_ring)
+	  break;
+      }
+
+      while (send_ring->completion_ptr != NULL) {
+	iocb = send_ring->completion_ptr;
+	iocblist[0] = iocb;
+	if (aio_suspend(iocblist, 1, NULL) == -1) {
+	  perror("netperf: data send error");
+	  exit(1);
+	}
+
+	error = aio_error(iocb);
+	if (error == 0)
+	  local_bytes_sent += aio_return(iocb);
+	else if (error != ECANCELED) {
+	  errno = error;
+	  perror("netperf: data send error");
+	  exit(1);
+	}
+	send_ring->completion_ptr = NULL;
+	send_ring = send_ring->next;
+	free(iocb);
+      }
+    }
+#endif
 
     /* but first, if the verbosity is greater than 1, find-out what */
     /* the TCP maximum segment_size was (if possible) */
