@@ -3357,6 +3357,7 @@ Size (bytes)\n\n";
 #endif /* DIRTY */
     tcp_stream_request->port            =    atoi(remote_data_port);
     tcp_stream_request->ipfamily = af_to_nf(remote_res->ai_family);
+    tcp_stream_request->recv_aio        =       rem_rcvaio;
     if (debug > 1) {
       fprintf(where,
 	      "netperf: send_tcp_mss: requesting TCP stream test\n");
@@ -3707,6 +3708,7 @@ Size (bytes)\n\
 #endif /* DIRTY */
         tcp_stream_request->port            =    atoi(remote_data_port);
         tcp_stream_request->ipfamily = af_to_nf(remote_res->ai_family);
+	tcp_stream_request->recv_aio      =       rem_rcvaio;
         if (debug > 1) {
             fprintf(where,
                     "netperf: send_tcp_stream: requesting TCP stream test\n");
@@ -4521,6 +4523,7 @@ Size (bytes)\n\
 #endif /* DIRTY */
     tcp_stream_request->port     = atoi(remote_data_port);
     tcp_stream_request->ipfamily = af_to_nf(remote_res->ai_family);
+    tcp_stream_request->recv_aio        =       rem_rcvaio;
 
     if (debug > 1) {
       fprintf(where,
